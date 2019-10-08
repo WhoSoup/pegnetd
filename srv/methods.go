@@ -79,7 +79,7 @@ func (s *APIServer) getTransaction(getEntry bool) jrpc.MethodFunc {
 		e.Hash = params.Hash
 		err = e.Get(s.Node.FactomClient)
 		if err != nil {
-			return jrpc.NewError(jrpc.InternalErrorCode, jrpc.InternalErrorMessage, nil)
+			panic(err) // Defer to internal error
 		}
 
 		if !e.IsPopulated() {
@@ -100,7 +100,7 @@ func (s *APIServer) getTransaction(getEntry bool) jrpc.MethodFunc {
 		txBatch := fat2.NewTransactionBatch(e)
 		err = txBatch.UnmarshalEntry()
 		if err != nil {
-			return jrpc.NewError(jrpc.InternalErrorCode, jrpc.InternalErrorMessage, nil)
+			panic(err) // Defer to internal error
 		}
 
 		res.Tx = txBatch
@@ -147,7 +147,7 @@ func (s *APIServer) getPegnetBalances(data json.RawMessage) interface{} {
 		return ErrorAddressNotFound
 	}
 	if err != nil {
-		return jrpc.NewError(jrpc.InternalErrorCode, jrpc.InternalErrorMessage, nil)
+		panic(err) // Defer to internal error
 	}
 	return ResultPegnetTickerMap(bals)
 }
@@ -163,7 +163,7 @@ func (s *APIServer) getPegnetIssuance(data json.RawMessage) interface{} {
 		return ErrorAddressNotFound
 	}
 	if err != nil {
-		return jrpc.NewError(jrpc.InternalErrorCode, jrpc.InternalErrorMessage, nil)
+		panic(err) // Defer to internal error
 	}
 
 	syncStatus := s.getSyncStatus(nil)
@@ -183,7 +183,7 @@ func (s *APIServer) getPegnetRates(data json.RawMessage) interface{} {
 		return ErrorNotFound
 	}
 	if err != nil {
-		return jrpc.NewError(jrpc.InternalErrorCode, jrpc.InternalErrorMessage, nil)
+		panic(err) // Defer to internal error
 	}
 
 	// The balance results actually works for rates too
@@ -201,7 +201,7 @@ func (s *APIServer) sendTransaction(data json.RawMessage) interface{} {
 	ecPrivateKeyString := s.Config.GetString(config.ECPrivateKey)
 	var ecPrivateKey factom.EsAddress
 	if err = ecPrivateKey.Set(ecPrivateKeyString); err != nil {
-		return jrpc.NewError(jrpc.InternalErrorCode, jrpc.InternalErrorMessage, nil)
+		panic(err) // Defer to internal error
 	}
 
 	entry := params.Entry()
