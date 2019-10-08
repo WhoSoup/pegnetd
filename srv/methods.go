@@ -28,7 +28,6 @@ import (
 	"database/sql"
 	"encoding/json"
 
-	"github.com/AdamSLevy/jsonrpc2"
 	jrpc "github.com/AdamSLevy/jsonrpc2/v11"
 	"github.com/Factom-Asset-Tokens/factom"
 	"github.com/pegnet/pegnetd/config"
@@ -80,7 +79,7 @@ func (s *APIServer) getTransaction(getEntry bool) jrpc.MethodFunc {
 		e.Hash = params.Hash
 		err = e.Get(s.Node.FactomClient)
 		if err != nil {
-			return jsonrpc2.InternalError
+			return jrpc.NewError(jrpc.InternalErrorCode, jrpc.InternalErrorMessage, nil)
 		}
 
 		if !e.IsPopulated() {
@@ -101,7 +100,7 @@ func (s *APIServer) getTransaction(getEntry bool) jrpc.MethodFunc {
 		txBatch := fat2.NewTransactionBatch(e)
 		err = txBatch.UnmarshalEntry()
 		if err != nil {
-			return jsonrpc2.InternalError
+			return jrpc.NewError(jrpc.InternalErrorCode, jrpc.InternalErrorMessage, nil)
 		}
 
 		res.Tx = txBatch
@@ -148,7 +147,7 @@ func (s *APIServer) getPegnetBalances(data json.RawMessage) interface{} {
 		return ErrorAddressNotFound
 	}
 	if err != nil {
-		return jsonrpc2.InternalError
+		return jrpc.NewError(jrpc.InternalErrorCode, jrpc.InternalErrorMessage, nil)
 	}
 	return ResultPegnetTickerMap(bals)
 }
@@ -164,7 +163,7 @@ func (s *APIServer) getPegnetIssuance(data json.RawMessage) interface{} {
 		return ErrorAddressNotFound
 	}
 	if err != nil {
-		return jsonrpc2.InternalError
+		return jrpc.NewError(jrpc.InternalErrorCode, jrpc.InternalErrorMessage, nil)
 	}
 
 	syncStatus := s.getSyncStatus(nil)
@@ -184,7 +183,7 @@ func (s *APIServer) getPegnetRates(data json.RawMessage) interface{} {
 		return ErrorNotFound
 	}
 	if err != nil {
-		return jsonrpc2.InternalError
+		return jrpc.NewError(jrpc.InternalErrorCode, jrpc.InternalErrorMessage, nil)
 	}
 
 	// The balance results actually works for rates too
@@ -202,7 +201,7 @@ func (s *APIServer) sendTransaction(data json.RawMessage) interface{} {
 	ecPrivateKeyString := s.Config.GetString(config.ECPrivateKey)
 	var ecPrivateKey factom.EsAddress
 	if err = ecPrivateKey.Set(ecPrivateKeyString); err != nil {
-		return jsonrpc2.InternalError
+		return jrpc.NewError(jrpc.InternalErrorCode, jrpc.InternalErrorMessage, nil)
 	}
 
 	entry := params.Entry()
