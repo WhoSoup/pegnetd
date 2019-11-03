@@ -25,6 +25,7 @@ func init() {
 	rootCmd.AddCommand(issuance)
 	rootCmd.AddCommand(status)
 	rootCmd.AddCommand(burn)
+	rootCmd.AddCommand(rich)
 
 	get.AddCommand(getTX)
 	get.AddCommand(getRates)
@@ -259,6 +260,30 @@ var balance = &cobra.Command{
 		balance := res[ticker]
 		humanBal := FactoshiToFactoid(int64(balance))
 		fmt.Printf("%s %s\n", humanBal, ticker.String())
+	},
+}
+
+var rich = &cobra.Command{
+	Use:              "richlist",
+	Short:            "Get Top 100 Rich",
+	PersistentPreRun: always,
+	PreRun:           SoftReadConfig,
+	Args:             cobra.MaximumNArgs(0),
+	Run: func(cmd *cobra.Command, args []string) {
+		cl := srv.NewClient()
+		cl.PegnetdServer = viper.GetString(config.Pegnetd)
+		var res srv.ResultGetRichList
+		err := cl.Request("get-rich-list", nil, &res)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+
+		fmt.Println("Top 100 for Height", res.Height)
+		fmt.Println("Position,Address,USD Equivalent")
+		for i, e := range res.Top100 {
+			fmt.Printf("%d,%s,%s\n", i+1, e.Address, FactoshiToFactoid(e.USDEquiv))
+		}
 	},
 }
 

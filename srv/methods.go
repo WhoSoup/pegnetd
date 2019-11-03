@@ -65,7 +65,7 @@ type ResultGetRichList struct {
 }
 type RichEntry struct {
 	Address  *factom.FAAddress `json:"address"`
-	USDEquiv float64           `json:"usdequiv"`
+	USDEquiv int64             `json:"usdequiv"`
 }
 
 func (s *APIServer) getRichList(data json.RawMessage) interface{} {
@@ -99,7 +99,7 @@ func (s *APIServer) getRichList(data json.RawMessage) interface{} {
 			continue
 		}
 
-		res.Top100 = append(res.Top100, RichEntry{Address: a, USDEquiv: float64(usd) / 1e8})
+		res.Top100 = append(res.Top100, RichEntry{Address: a, USDEquiv: usd})
 	}
 
 	sort.Slice(res.Top100, func(i, j int) bool {
