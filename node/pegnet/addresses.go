@@ -190,6 +190,25 @@ func (p *Pegnet) SelectPendingBalances(tx *sql.Tx, adr *factom.FAAddress) (map[f
 	return p.selectBalances(tx, adr)
 }
 
+func (p *Pegnet) SelectAddresses() ([]*factom.FAAddress, error) {
+
+	rows, err := p.DB.Query("SELECT address FROM pn_addresses")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var res []*factom.FAAddress
+	for rows.Next() {
+		var adr []byte
+		rows.Scan(&adr)
+		var fa factom.FAAddress
+		copy(fa[:], adr)
+		res = append(res, &fa)
+	}
+
+	return res, nil
+}
+
 // SelectBalances returns a map of all valid PTickers and their associated
 // balances for the given address. If the address is not in the database,
 // the map will contain 0 for all valid PTickers.

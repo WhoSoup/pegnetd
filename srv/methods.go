@@ -27,6 +27,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"sort"
+
+	"github.com/pegnet/pegnet/modules/conversions"
 
 	"github.com/AdamSLevy/jsonrpc2"
 	jrpc "github.com/AdamSLevy/jsonrpc2/v11"
@@ -39,6 +42,7 @@ import (
 
 func (s *APIServer) jrpcMethods() jrpc.MethodMap {
 	return jrpc.MethodMap{
+		"get-rich-list":          s.getRichList,
 		"get-transactions":       s.getTransactions,
 		"get-transaction-status": s.getTransactionStatus,
 		"get-transaction":        s.getTransaction(false),
@@ -53,6 +57,60 @@ func (s *APIServer) jrpcMethods() jrpc.MethodMap {
 		"get-pegnet-rates": s.getPegnetRates,
 	}
 
+}
+
+type ResultGetRichList struct {
+	Height uint32      `json:"height"`
+	Top100 []RichEntry `json:"top100"`
+}
+type RichEntry struct {
+	Address  *factom.FAAddress `json:"address"`
+	USDEquiv float64           `json:"usdequiv"`
+}
+
+func (s *APIServer) getRichList(data json.RawMessage) interface{} {
+	height := s.Node.GetCurrentSync()
+
+	var res ResultGetRichList
+	res.Height = height
+
+	addrs, err := s.Node.Pegnet.SelectAddresses()
+	if err != nil {
+		return err
+	}
+	rates, err := s.Node.Pegnet.SelectRates(nil, height)
+	if err != nil {
+		return rates
+	}
+
+	for _, a := range addrs {
+		var usd int64
+		balance, err := s.Node.Pegnet.SelectBalances(a)
+		if err != nil {
+			return err
+		}
+
+		for k, v := range balance {
+			tmp, _ := conversions.Convert(int64(v), rates[k], rates[fat2.PTickerUSD])
+			usd += tmp
+		}
+
+		if usd == 0 {
+			continue
+		}
+
+		res.Top100 = append(res.Top100, RichEntry{Address: a, USDEquiv: float64(usd) / 1e8})
+	}
+
+	sort.Slice(res.Top100, func(i, j int) bool {
+		return res.Top100[i].USDEquiv > res.Top100[j].USDEquiv
+	})
+
+	if len(res.Top100) > 100 {
+		res.Top100 = res.Top100[:100]
+	}
+
+	return res
 }
 
 type ResultGetTransactionStatus struct {
