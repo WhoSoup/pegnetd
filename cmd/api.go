@@ -1,14 +1,16 @@
 package cmd
 
 import (
+	"crypto/ed25519"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Factom-Asset-Tokens/factom"
-	"github.com/pegnet/pegnet/cmd"
 	"github.com/pegnet/pegnetd/config"
 	"github.com/pegnet/pegnetd/fat/fat2"
 	"github.com/pegnet/pegnetd/node"
@@ -23,16 +25,138 @@ func init() {
 	rootCmd.AddCommand(balances)
 	rootCmd.AddCommand(issuance)
 	rootCmd.AddCommand(status)
+	rootCmd.AddCommand(burn)
 
 	get.AddCommand(getTX)
 	get.AddCommand(getRates)
 	get.AddCommand(getStats)
+	getTXs.Flags().Bool("burn", false, "Show burns")
+	getTXs.Flags().Bool("cvt", false, "Show converions")
+	getTXs.Flags().Bool("tran", false, "Show transfers")
+	getTXs.Flags().Bool("coin", false, "Show coinbases")
+	getTXs.Flags().String("asset", "", "Filter by specific asset")
+	getTXs.Flags().Int("offset", 0, "Specify an offset for pagination")
+
+	get.AddCommand(getTXs)
 	rootCmd.AddCommand(get)
 
 	//tx.Flags()
 	rootCmd.AddCommand(tx)
 	rootCmd.AddCommand(conv)
 
+}
+
+var burn = &cobra.Command{
+	Use:              "burn <FA-SOURCE> <AMOUNT>",
+	Short:            "Converts FCT into pFCT",
+	Example:          "pegnetd burn FA2jK2HcLnRdS94dEcU27rF3meoJfpUcZPSinpb7AwQvPRY6RL1Q 50",
+	PersistentPreRun: always,
+	PreRun:           SoftReadConfig,
+	Args: CombineCobraArgs(
+		CustomArgOrderValidationBuilder(
+			true,
+			ArgValidatorFCTAddress,
+			ArgValidatorFCTAmount,
+		),
+	),
+	Run: func(cmd *cobra.Command, args []string) {
+		var err error
+		cl := node.FactomClientFromConfig(viper.GetViper())
+		source, amt := args[0], args[1]
+
+		amount, err := FactoidToFactoshi(amt)
+		if err != nil {
+			cmd.PrintErrln(fmt.Errorf("invalid amount specified"))
+			os.Exit(1)
+		}
+
+		addr, err := factom.NewFAAddress(source)
+		if err != nil {
+			cmd.PrintErrln("invalid input address specified")
+			os.Exit(1)
+		}
+		faddr := factom.Bytes32(addr)
+
+		priv, err := addr.GetFsAddress(cl)
+		if err != nil {
+			cmd.PrintErrf("unable to get private key: %s\n", err.Error())
+			os.Exit(1)
+		}
+
+		rcd, _, err := factom.DecodeRCD(priv.RCD())
+		if err != nil {
+			cmd.PrintErrf("unable to decode private key: %s\n", err.Error())
+			os.Exit(1)
+		}
+
+		balance, err := addr.GetBalance(cl)
+		if err != nil {
+			cmd.PrintErrln("unable to retrieve balance:" + err.Error())
+			os.Exit(1)
+		}
+
+		if balance < uint64(amount) {
+			cmd.PrintErrf("not enough balance to cover the amount. balance = %s\n", FactoshiToFactoid(int64(balance)))
+			os.Exit(1)
+		}
+
+		burnAddress, _ := factom.NewECAddress(node.BurnAddress)
+		fBurnAddress := factom.Bytes32(burnAddress)
+
+		var trans factom.FactoidTransaction
+		trans.Version = 2
+		trans.Timestamp = time.Now()
+		trans.InputCount = 1
+		trans.ECOutputCount = 1
+		trans.FCTInputs = append(trans.FCTInputs, factom.FactoidTransactionIO{
+			Amount:  uint64(amount),
+			Address: &faddr,
+		})
+		trans.ECOutputs = append(trans.ECOutputs, factom.FactoidTransactionIO{
+			Amount:  0,
+			Address: &fBurnAddress,
+		})
+
+		// the library requires at least one signature to "be populated"
+		// fill in below with real sig
+		trans.Signatures = append(trans.Signatures, factom.FactoidTransactionSignature{
+			ReedeemCondition: rcd,
+			SignatureBlock:   nil,
+		})
+
+		data, err := trans.MarshalLedgerBinary()
+		if err != nil { // should not happen
+			cmd.PrintErrf("unable to marshal for signature: %s\n", err.Error())
+			os.Exit(1)
+		}
+
+		sig := ed25519.Sign(priv.PrivateKey(), data)
+		trans.Signatures[0].SignatureBlock = sig
+
+		raw, err := trans.MarshalBinary()
+		if err != nil { // should not happen
+			cmd.PrintErrf("unable to marshal transaction: %s\n", err.Error())
+			os.Exit(1)
+		}
+
+		params := struct {
+			Hex string `json:"transaction"`
+		}{Hex: fmt.Sprintf("%x", raw)}
+
+		var result struct {
+			Message string `json:"message"`
+			TXID    string `json:"txid"`
+		}
+
+		err = cl.FactomdRequest("factoid-submit", params, &result)
+		if err != nil {
+			cmd.PrintErrf("unable to submit transaction: %s\n", err.Error())
+			os.Exit(1)
+		}
+
+		fmt.Println(result.Message)
+		fmt.Printf("Transaction ID: %s\n", result.TXID)
+	},
 }
 
 var conv = &cobra.Command{
@@ -43,19 +167,26 @@ var conv = &cobra.Command{
 		" pFCT 100 pUSD ",
 	PersistentPreRun: always,
 	PreRun:           SoftReadConfig,
-	Args: cmd.CombineCobraArgs(
-		cmd.CustomArgOrderValidationBuilder(
+	Args: CombineCobraArgs(
+		CustomArgOrderValidationBuilder(
 			true,
-			cmd.ArgValidatorECAddress,
-			cmd.ArgValidatorFCTAddress,
+			ArgValidatorECAddress,
+			ArgValidatorFCTAddress,
 			ArgValidatorAssetOrP,
-			cmd.ArgValidatorFCTAmount,
+			ArgValidatorFCTAmount,
 			ArgValidatorAssetOrP),
 	),
 	Run: func(cmd *cobra.Command, args []string) {
 		var err error
 		cl := node.FactomClientFromConfig(viper.GetViper())
 		payment, source, srcAsset, amt, destAsset := args[0], args[1], args[2], args[3], args[4]
+
+		// Let's check the pXXX -> pFCT first
+		status := getStatus()
+		if (destAsset == "pFCT" || destAsset == "FCT") && uint32(status.Current) >= node.OneWaypFCTConversions {
+			cmd.PrintErrln(fmt.Sprintf("pXXX -> pFCT conversions are not allowed since block height %d. If you need to aquire pFCT, you have to burn FCT -> pFCT", node.OneWaypFCTConversions))
+			os.Exit(1)
+		}
 
 		// Build the transaction from the args
 		var trans fat2.Transaction
@@ -88,14 +219,14 @@ var tx = &cobra.Command{
 		" FA33kNzXwUt3cn4tLR56kyHEAryazAGPuMC6GjUubSbwrrNv8e7t PEG 200 FA32xV6SoPBSbAZAVyuiHWwyoMYhnSyMmAHZfK29H8dx7bJXFLja",
 	PersistentPreRun: always,
 	PreRun:           SoftReadConfig,
-	Args: cmd.CombineCobraArgs(
-		cmd.CustomArgOrderValidationBuilder(
+	Args: CombineCobraArgs(
+		CustomArgOrderValidationBuilder(
 			true,
-			cmd.ArgValidatorECAddress,
-			cmd.ArgValidatorFCTAddress,
+			ArgValidatorECAddress,
+			ArgValidatorFCTAddress,
 			ArgValidatorAssetOrP,
-			cmd.ArgValidatorFCTAmount,
-			cmd.ArgValidatorFCTAddress),
+			ArgValidatorFCTAmount,
+			ArgValidatorFCTAddress),
 	),
 	Run: func(cmd *cobra.Command, args []string) {
 		cl := node.FactomClientFromConfig(viper.GetViper())
@@ -131,8 +262,8 @@ var balance = &cobra.Command{
 	Example:          "pegnetd balance PEG FA2CEc2JSkhuckEXy42K111MvM9bycUDkbrrHjd9bNkBfvPBSGKd",
 	PersistentPreRun: always,
 	PreRun:           SoftReadConfig,
-	Args: cmd.CombineCobraArgs(
-		cmd.CustomArgOrderValidationBuilder(false, ArgValidatorAssetOrP, cmd.ArgValidatorFCTAddress),
+	Args: CombineCobraArgs(
+		CustomArgOrderValidationBuilder(true, ArgValidatorAssetOrP, ArgValidatorFCTAddress),
 		cobra.MinimumNArgs(1)),
 	Run: func(cmd *cobra.Command, args []string) {
 		res, err := queryBalances(args[1])
@@ -154,8 +285,8 @@ var balances = &cobra.Command{
 	Example:          "pegnetd balances FA2CEc2JSkhuckEXy42K111MvM9bycUDkbrrHjd9bNkBfvPBSGKd",
 	PersistentPreRun: always,
 	PreRun:           SoftReadConfig,
-	Args: cmd.CombineCobraArgs(
-		cmd.CustomArgOrderValidationBuilder(false, cmd.ArgValidatorFCTAddress),
+	Args: CombineCobraArgs(
+		CustomArgOrderValidationBuilder(true, ArgValidatorFCTAddress),
 		cobra.MinimumNArgs(1)),
 	Run: func(cmd *cobra.Command, args []string) {
 		res, err := queryBalances(args[0])
@@ -241,10 +372,48 @@ var status = &cobra.Command{
 	PersistentPreRun: always,
 	PreRun:           SoftReadConfig,
 	Run: func(cmd *cobra.Command, args []string) {
+		res := getStatus()
+		data, err := json.Marshal(res)
+		if err != nil {
+			panic(err)
+		}
+		fmt.Println(string(data))
+	},
+}
+
+func getStatus() srv.ResultGetSyncStatus {
+	cl := srv.NewClient()
+	cl.PegnetdServer = viper.GetString(config.Pegnetd)
+	var res srv.ResultGetSyncStatus
+	err := cl.Request("get-sync-status", nil, &res)
+	if err != nil {
+		fmt.Printf("Failed to make RPC request\nDetails:\n%v\n", err)
+		os.Exit(1)
+	}
+	return res
+}
+
+var get = &cobra.Command{
+	Use:   "get <subcommand>",
+	Short: "Able to read pegnet related information from the daemon.",
+}
+
+var getTX = &cobra.Command{
+	Use:              "tx <txid>",
+	Short:            "Fetch the transaction by the given entryhash",
+	PersistentPreRun: always,
+	PreRun:           SoftReadConfig,
+	Args:             cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		_, _, err := pegnet.SplitTxID(args[0])
+		if err != nil {
+			cmd.PrintErrf("txid is invalid: %s", err.Error())
+		}
+
 		cl := srv.NewClient()
 		cl.PegnetdServer = viper.GetString(config.Pegnetd)
-		var res srv.ResultGetSyncStatus
-		err := cl.Request("get-sync-status", nil, &res)
+		var res srv.ResultGetTransactions
+		err = cl.Request("get-transaction", srv.ParamsGetPegnetTransaction{TxID: args[0]}, &res)
 		if err != nil {
 			fmt.Printf("Failed to make RPC request\nDetails:\n%v\n", err)
 			os.Exit(1)
@@ -258,27 +427,58 @@ var status = &cobra.Command{
 	},
 }
 
-var get = &cobra.Command{
-	Use:   "get <subcommand>",
-	Short: "Able to read pegnet related information from the daemon.",
-}
-
-var getTX = &cobra.Command{
-	Use:              "tx <entryhash>",
-	Short:            "Fetch the transaction by the given entryhash",
+var getTXs = &cobra.Command{
+	Use:   "txs <entryhash | FA address | height>",
+	Short: "Fetch all transactions for an entryhash, FA address, or height",
+	Long: "Fetch all transactions for an entryhash, FA address, or height. " +
+		"If a --burn, --cvt, --tran, or --coin is provided, then only the flags" +
+		" provided will be displayed. If you specify --asset=pAsset, only transactions" +
+		" involving that asset will be returned.",
+	Example:          "pegnetd txs 07cebdd5d3f5216f36f792d71f030af07ddaa99147929d9af477833ee4c586a5",
 	PersistentPreRun: always,
 	PreRun:           SoftReadConfig,
 	Args:             cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		ehash := factom.NewBytes32FromString(args[0])
-		if ehash.IsZero() {
-			cmd.PrintErrf("entryhash must be a 64 character hex string")
+		var height int
+		// determine the params
+		var params srv.ParamsGetPegnetTransaction
+
+		// An entryhash?
+		bytes, err := hex.DecodeString(args[0])
+		if err == nil && len(bytes) == 32 {
+			params.Hash = args[0]
+			goto FoundParams
 		}
+
+		// A factoid address maybe?
+		_, err = factom.NewFAAddress(args[0])
+		if err == nil {
+			params.Address = args[0]
+			goto FoundParams
+		}
+
+		// Ok, maybe it's a height!
+		height, err = strconv.Atoi(args[0])
+		if err == nil {
+			params.Height = height
+			goto FoundParams
+		}
+
+		// I give up.
+		cmd.PrintErrf("param invalid. could not determine type")
+	FoundParams:
+
+		params.Conversion, _ = cmd.Flags().GetBool("cvt")
+		params.Burn, _ = cmd.Flags().GetBool("burn")
+		params.Transfer, _ = cmd.Flags().GetBool("tran")
+		params.Coinbase, _ = cmd.Flags().GetBool("coin")
+		params.Asset, _ = cmd.Flags().GetString("asset")
+		params.Offset, _ = cmd.Flags().GetInt("offset")
 
 		cl := srv.NewClient()
 		cl.PegnetdServer = viper.GetString(config.Pegnetd)
-		var res srv.ResultGetTransaction
-		err := cl.Request("get-transaction", srv.ParamsGetTransaction{ParamsToken: srv.ParamsToken{ChainID: &node.TransactionChain}, Hash: ehash}, &res)
+		var res srv.ResultGetTransactions
+		err = cl.Request("get-transactions", params, &res)
 		if err != nil {
 			fmt.Printf("Failed to make RPC request\nDetails:\n%v\n", err)
 			os.Exit(1)
