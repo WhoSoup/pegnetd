@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"text/tabwriter"
 	"time"
 
 	"github.com/Factom-Asset-Tokens/factom"
@@ -30,6 +31,11 @@ func init() {
 	get.AddCommand(getTX)
 	get.AddCommand(getRates)
 	get.AddCommand(getStats)
+	rich.Flags().Int("count", 100, "The top X address")
+	rootCmd.AddCommand(rich)
+
+	get.AddCommand(getTX)
+	get.AddCommand(getRates)
 	getTXs.Flags().Bool("burn", false, "Show burns")
 	getTXs.Flags().Bool("cvt", false, "Show converions")
 	getTXs.Flags().Bool("tran", false, "Show transfers")
@@ -44,6 +50,78 @@ func init() {
 	rootCmd.AddCommand(tx)
 	rootCmd.AddCommand(conv)
 
+}
+
+var rich = &cobra.Command{
+	Use:              "richlist [ASSET]",
+	Short:            "Get a list of richest addresses",
+	Example:          "richlist PEG --count=1",
+	PersistentPreRun: always,
+	PreRun:           SoftReadConfig,
+	Args:             cobra.MaximumNArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		cl := srv.NewClient()
+		cl.PegnetdServer = viper.GetString(config.Pegnetd)
+		count, _ := cmd.Flags().GetInt("count")
+		if count == 0 {
+			count = 100
+		}
+
+		if len(args) > 0 {
+			ticker := fat2.StringToTicker(args[0])
+			if ticker == fat2.PTickerInvalid {
+				cmd.PrintErrln(fmt.Errorf("invalid asset specified"))
+				os.Exit(1)
+			}
+
+			assetRich(cl, ticker.String(), count)
+		} else {
+			globalRich(cl, count)
+		}
+	},
+}
+
+func assetRich(cl *srv.Client, asset string, count int) {
+	var params srv.ParamsGetRichList
+	params.Asset = asset
+	params.Count = count
+
+	var res []srv.ResultGetRichList
+	err := cl.Request("get-rich-list", params, &res)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Top %d %s Rich List\n", count, asset)
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintf(tw, "Pos\tAddress\t%s\tpUSD\t\n", asset)
+	fmt.Fprintf(tw, "---\t-------\t%s\t----\t\n", strings.Repeat("-", len(asset)))
+	for i, e := range res {
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t\n", i+1, e.Address, FactoshiToFactoid(int64(e.Amount)), FactoshiToFactoid(int64(e.Equiv)))
+	}
+	tw.Flush()
+}
+
+func globalRich(cl *srv.Client, count int) {
+	var params srv.ParamsGetGlobalRichList
+	params.Count = count
+
+	var res []srv.ResultGlobalRichList
+	err := cl.Request("get-global-rich-list", params, &res)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Top %d Global Rich List\n", count)
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintf(tw, "Pos\tAddress\tpUSD\t\n")
+	fmt.Fprintf(tw, "---\t-------\t----\t\n")
+	for i, e := range res {
+		fmt.Fprintf(tw, "%d\t%s\t%s\t\n", i+1, e.Address, FactoshiToFactoid(int64(e.Equiv)))
+	}
+	tw.Flush()
 }
 
 var burn = &cobra.Command{
@@ -478,7 +556,7 @@ var getTXs = &cobra.Command{
 		cl := srv.NewClient()
 		cl.PegnetdServer = viper.GetString(config.Pegnetd)
 		var res srv.ResultGetTransactions
-		err = cl.Request("get-transactions", params, &res)
+		err = cl.Request("get-transaction", srv.ParamsGetPegnetTransaction{TxID: args[0]}, &res)
 		if err != nil {
 			fmt.Printf("Failed to make RPC request\nDetails:\n%v\n", err)
 			os.Exit(1)

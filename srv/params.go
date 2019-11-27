@@ -39,6 +39,41 @@ type Params interface {
 	HasIncludePending() bool
 }
 
+type ParamsGetGlobalRichList struct {
+	Count int `json:"count,omitempty"`
+}
+
+func (p ParamsGetGlobalRichList) HasIncludePending() bool { return false }
+func (p ParamsGetGlobalRichList) IsValid() error {
+	if p.Count < 0 {
+		return jrpc.InvalidParams("count must be >= 0")
+	}
+	return nil
+}
+func (p ParamsGetGlobalRichList) ValidChainID() *factom.Bytes32 {
+	return nil
+}
+
+type ParamsGetRichList struct {
+	Asset string `json:"asset,omitempty"`
+	Count int    `json:"count,omitempty"`
+}
+
+func (p ParamsGetRichList) HasIncludePending() bool { return false }
+func (p ParamsGetRichList) IsValid() error {
+	ticker := fat2.StringToTicker(p.Asset)
+	if ticker == fat2.PTickerInvalid {
+		return jrpc.InvalidParams("invalid asset")
+	}
+	if p.Count < 0 {
+		return jrpc.InvalidParams("count must be >= 0")
+	}
+	return nil
+}
+func (p ParamsGetRichList) ValidChainID() *factom.Bytes32 {
+	return nil
+}
+
 // ParamsToken scopes a request down to a single FAT token using either the
 // ChainID or both the TokenID and the IssuerChainID.
 type ParamsToken struct {
@@ -115,7 +150,7 @@ type ParamsGetPegnetTransactionStatus struct {
 	Hash *factom.Bytes32 `json:"entryhash,omitempty"`
 }
 
-func (ParamsGetPegnetTransactionStatus) HasIncludePending() bool { return false }
+func (p ParamsGetPegnetTransactionStatus) HasIncludePending() bool { return false }
 func (p ParamsGetPegnetTransactionStatus) IsValid() error {
 	if p.Hash == nil {
 		return jrpc.InvalidParams(`required: "entryhash"`)
