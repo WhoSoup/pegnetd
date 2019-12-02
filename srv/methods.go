@@ -356,7 +356,7 @@ func (s *APIServer) getPegnetRates(data json.RawMessage) interface{} {
 	if _, _, err := validate(data, &params); err != nil {
 		return err
 	}
-	rates, err := s.Node.Pegnet.SelectRates(context.Background(), *params.Height)
+	rates, err := s.Node.Pegnet.SelectRecentRates(context.Background(), *params.Height)
 	if err == sql.ErrNoRows || rates == nil || len(rates) == 0 {
 		return ErrorNotFound
 	}
@@ -365,7 +365,7 @@ func (s *APIServer) getPegnetRates(data json.RawMessage) interface{} {
 	}
 
 	// The balance results actually works for rates too
-	return ResultPegnetTickerMap(rates)
+	return rates
 }
 
 func (s *APIServer) sendTransaction(data json.RawMessage) interface{} {
