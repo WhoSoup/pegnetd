@@ -160,7 +160,7 @@ func (p *Pegnet) SelectRates(ctx context.Context, height uint32) (map[fat2.PTick
 	return _extractAssets(rows)
 }
 func (p *Pegnet) SelectRecentRates(ctx context.Context, height uint32) (map[string]uint64, error) {
-	rows, err := p.DB.Query("SELECT token, value FROM pn_rate WHERE height = (SELECT MAX(height) FROM pn_grade WHERE height <= $1)", height)
+	rows, err := p.DB.Query("SELECT token, value FROM pn_rate WHERE height = (SELECT MAX(height) FROM pn_rate WHERE height <= $1)", height)
 	if err != nil {
 		return nil, err
 	}
