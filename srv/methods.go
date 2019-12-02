@@ -54,6 +54,7 @@ func (s *APIServer) jrpcMethods() jrpc.MethodMap {
 		"get-sync-status": s.getSyncStatus,
 
 		"get-pegnet-rates": s.getPegnetRates,
+		"get-stats":        s.getStats,
 	}
 
 }
@@ -506,4 +507,21 @@ func unmarshalStrict(data []byte, v interface{}) error {
 	d := json.NewDecoder(b)
 	d.DisallowUnknownFields()
 	return d.Decode(v)
+}
+
+func (s *APIServer) getStats(data json.RawMessage) interface{} {
+	params := ParamsGetStats{}
+	if _, _, err := validate(data, &params); err != nil {
+		return err
+	}
+	stats, err := s.Node.Pegnet.SelectStats(context.Background(), *params.Height)
+	if err == sql.ErrNoRows {
+		return ErrorNotFound
+	}
+	if err != nil {
+		return jsonrpc2.InternalError
+	}
+
+	// The balance results actually works for rates too
+	return stats
 }
