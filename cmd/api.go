@@ -27,11 +27,13 @@ func init() {
 	rootCmd.AddCommand(issuance)
 	rootCmd.AddCommand(status)
 	rootCmd.AddCommand(burn)
-	rich.Flags().Int("count", 100, "The top X address")
-	rootCmd.AddCommand(rich)
 
 	get.AddCommand(getTX)
 	get.AddCommand(getRates)
+	get.AddCommand(getStats)
+	rich.Flags().Int("count", 100, "The top X address")
+	rootCmd.AddCommand(rich)
+
 	getTXs.Flags().Bool("burn", false, "Show burns")
 	getTXs.Flags().Bool("cvt", false, "Show converions")
 	getTXs.Flags().Bool("tran", false, "Show transfers")
@@ -568,7 +570,7 @@ var getTXs = &cobra.Command{
 
 var getRates = &cobra.Command{
 	Use:              "rates <height>",
-	Short:            "Fetch the pegnet quotes for the assets at a given height (if their are quotes)",
+	Short:            "Fetch the pegnet quotes for the assets at a given height (if there are quotes)",
 	PersistentPreRun: always,
 	PreRun:           SoftReadConfig,
 	Args:             cobra.ExactArgs(1),
@@ -581,7 +583,7 @@ var getRates = &cobra.Command{
 
 		cl := srv.NewClient()
 		cl.PegnetdServer = viper.GetString(config.Pegnetd)
-		var res srv.ResultPegnetTickerMap
+		var res map[string]uint64
 		uH := uint32(height)
 		err = cl.Request("get-pegnet-rates", srv.ParamsGetPegnetRates{Height: &uH}, &res)
 		if err != nil {
@@ -589,17 +591,38 @@ var getRates = &cobra.Command{
 			os.Exit(1)
 		}
 
-		// Change the units to be human readable
-		humanBals := make(map[string]string)
-		for k, bal := range res {
-			humanBals[k.String()] = FactoshiToFactoid(int64(bal))
-		}
-
-		data, err := json.Marshal(humanBals)
+		data, err := json.Marshal(res)
 		if err != nil {
 			panic(err)
 		}
 		fmt.Println(string(data))
+	},
+}
+
+var getStats = &cobra.Command{
+	Use:              "stats <height>",
+	Short:            "Fetch the pegnet stats at the height",
+	PersistentPreRun: always,
+	PreRun:           SoftReadConfig,
+	Args:             cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		height, err := strconv.Atoi(args[0])
+		if height <= 0 || err != nil {
+			cmd.PrintErrf("height must be a number greater than 0")
+			os.Exit(1)
+		}
+
+		cl := srv.NewClient()
+		cl.PegnetdServer = viper.GetString(config.Pegnetd)
+		var res pegnet.Stats
+		uH := uint32(height)
+		err = cl.Request("get-stats", srv.ParamsGetStats{Height: &uH}, &res)
+		if err != nil {
+			fmt.Printf("Failed to make RPC request\nDetails:\n%v\n", err)
+			os.Exit(1)
+		}
+
+		fmt.Println(res)
 	},
 }
 
