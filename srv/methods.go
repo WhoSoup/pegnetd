@@ -508,7 +508,7 @@ func unmarshalStrict(data []byte, v interface{}) error {
 	return d.Decode(v)
 }
 
-func (s *APIServer) getStats(data json.RawMessage) interface{} {
+func (s *APIServer) getStats(_ context.Context, data json.RawMessage) interface{} {
 	params := ParamsGetStats{}
 	if _, _, err := validate(data, &params); err != nil {
 		return err
@@ -518,7 +518,7 @@ func (s *APIServer) getStats(data json.RawMessage) interface{} {
 		return ErrorNotFound
 	}
 	if err != nil {
-		return jsonrpc2.InternalError
+		panic(err)
 	}
 
 	// The balance results actually works for rates too

@@ -136,7 +136,7 @@ func (ParamsGetStats) HasIncludePending() bool { return false }
 
 func (p ParamsGetStats) IsValid() error {
 	if p.Height == nil {
-		return jrpc.InvalidParams(`required: "height"`)
+		return jrpc.ErrorInvalidParams(`required: "height"`)
 	}
 	return nil
 }
