@@ -376,7 +376,7 @@ func (d *Pegnetd) ApplyTransactionBatchesInHolding(ctx context.Context, sqlTx *s
 		// The `conversions.PerBlock` is the allowed amount of PEG to be
 		// converted. So when the bank is implemented, it should be passed in
 		// here.
-		err = d.recordPegnetRequests(sqlTx, pegConversions, rates, currentHeight, conversions.PerBlock)
+		err = d.recordPegnetRequests(sqlTx, stats, pegConversions, rates, currentHeight, conversions.PerBlock)
 		if err != nil {
 			return err
 		}
@@ -599,7 +599,7 @@ type pegRequest struct {
 	TxIndex            int
 }
 
-func (d *Pegnetd) recordPegnetRequests(sqlTx *sql.Tx, txBatchs []*fat2.TransactionBatch, rates map[fat2.PTicker]uint64, currentHeight uint32, bank uint64) error {
+func (d *Pegnetd) recordPegnetRequests(sqlTx *sql.Tx, stats *pegnet.Stats, txBatchs []*fat2.TransactionBatch, rates map[fat2.PTicker]uint64, currentHeight uint32, bank uint64) error {
 	limit := conversions.NewConversionSupply(bank)
 	txData := make(map[string]pegRequest)
 
@@ -660,6 +660,12 @@ func (d *Pegnetd) recordPegnetRequests(sqlTx *sql.Tx, txBatchs []*fat2.Transacti
 		if _, err := d.Pegnet.AddToBalance(sqlTx, &tx.Input.Address, tx.Input.Type, uint64(refundAmt)); err != nil {
 			return err
 		}
+
+		// subtract refund from volume
+		stats.Volume[tx.Input.Type.String()] += tx.Input.Amount - uint64(refundAmt)
+		stats.VolumeOut[tx.Input.Type.String()] += tx.Input.Amount - uint64(refundAmt)
+		stats.Volume[tx.Conversion.String()] += uint64(pegYield)
+		stats.VolumeIn[tx.Conversion.String()] += uint64(pegYield)
 	}
 
 	return nil
