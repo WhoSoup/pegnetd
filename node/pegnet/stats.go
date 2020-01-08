@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 
+	"github.com/pegnet/pegnet/modules/conversions"
 	"github.com/pegnet/pegnetd/fat/fat2"
 )
 
@@ -15,13 +17,14 @@ const createTableStats = `CREATE TABLE IF NOT EXISTS "pn_stats" (
 `
 
 type Stats struct {
-	Height    uint32
-	Burns     uint64
-	Supply    map[string]int64
-	Volume    map[string]uint64
-	VolumeIn  map[string]uint64
-	VolumeOut map[string]uint64
-	VolumeTx  map[string]uint64
+	Height          uint32
+	Burns           uint64
+	ConversionTotal uint64
+	Supply          map[string]int64
+	Volume          map[string]uint64
+	VolumeIn        map[string]uint64
+	VolumeOut       map[string]uint64
+	VolumeTx        map[string]uint64
 }
 
 func NewStats(height uint32) *Stats {
@@ -47,6 +50,16 @@ FROM pn_addresses
 		return err
 	}
 
+	// get running total
+	prev, err := p.SelectPrevStats(tx, stats.Height)
+	if err != nil {
+		if err != sql.ErrNoRows {
+			return err
+		}
+	} else if prev != nil {
+		stats.ConversionTotal = prev.ConversionTotal
+	}
+
 	for i, v := range sum {
 		stats.Supply[fat2.PTicker(i+1).String()] = v
 	}
@@ -54,6 +67,25 @@ FROM pn_addresses
 	for k, v := range stats.Supply {
 		if v <= 0 {
 			delete(stats.Supply, k)
+		}
+	}
+
+	rates, err := p.SelectPendingRates(nil, tx, stats.Height)
+	if err != nil {
+		return err
+	}
+
+	for k, v := range stats.VolumeOut {
+		if k == "pUSD" {
+			stats.ConversionTotal += v
+		} else {
+			ts := fat2.StringToTicker(k)
+			pUSDEquiv, err := conversions.Convert(int64(v), rates[ts], rates[fat2.PTickerUSD])
+			if err != nil {
+				fmt.Println(rates)
+				return err
+			}
+			stats.ConversionTotal += uint64(pUSDEquiv)
 		}
 	}
 
@@ -73,6 +105,22 @@ FROM pn_addresses
 func (p *Pegnet) SelectStats(ctx context.Context, height uint32) (*Stats, error) {
 	var raw []byte
 	err := p.DB.QueryRowContext(ctx, "SELECT data FROM pn_stats WHERE height = $1", height).Scan(&raw)
+	if err != nil {
+		return nil, err
+	}
+
+	stats := new(Stats)
+	err = json.Unmarshal(raw, stats)
+	if err != nil {
+		return nil, err
+	}
+
+	return stats, nil
+}
+
+func (p *Pegnet) SelectPrevStats(tx *sql.Tx, height uint32) (*Stats, error) {
+	var raw []byte
+	err := tx.QueryRow("SELECT data FROM pn_stats WHERE height <= $1 ORDER BY height DESC LIMIT 1", height).Scan(&raw)
 	if err != nil {
 		return nil, err
 	}

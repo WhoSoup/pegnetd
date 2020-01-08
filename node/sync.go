@@ -570,7 +570,13 @@ func (d *Pegnetd) recordBatch(sqlTx *sql.Tx, txBatch *fat2.TransactionBatch, rat
 				return err
 			}
 			stats.Volume[tx.Input.Type.String()] += tx.Input.Amount
+
+			pUSDEquiv, err := conversions.Convert(int64(tx.Input.Amount), rates[tx.Input.Type], rates[fat2.PTickerUSD])
+			if err != nil {
+				return err
+			}
 			stats.VolumeOut[tx.Input.Type.String()] += tx.Input.Amount
+			stats.ConversionTotal += uint64(pUSDEquiv)
 			stats.Volume[tx.Conversion.String()] += uint64(outputAmount)
 			stats.VolumeIn[tx.Conversion.String()] += uint64(outputAmount)
 		} else {
